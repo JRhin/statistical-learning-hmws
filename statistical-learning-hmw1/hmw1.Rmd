@@ -1,0 +1,497 @@
+---
+title: "hmw1"
+output: pdf_document
+date: '2022-04-10'
+author: "Group G33: Hejaz Navaser, Mario Edoardo Pandolfo, Salim Sikder"
+---
+
+\newpage
+
+# Our job
+
+```{r data_stuff}
+# Load the data
+wmap <- read.csv("wmap.csv")
+
+# min max normalization
+min_max_norm <- function(x) {
+    (x - min(x)) / (max(x) - min(x))
+}
+
+# We normalize the data
+wmap <- cbind(wmap, lapply(wmap[1], min_max_norm))
+# We set the column with the normalize data as the main x colomn
+colnames(wmap) = c("X", "y", "x")
+```
+
+## Part 1
+
+### 1.1
+
+The purpose of using spline and Fourier Series is somehow similar. We fit the splines to different interval of the data to get a better approximation of the non-linear data by dividing it to different sections. In addition, we can use different degree of splines to get a continues model.The Fourier series is a way to represent a better approximation of a periodic function as a sum of sine and cosine functions, and this functions need to be orthogonal. Therefore, the both methods use a sum of more simple function to represent a more complicated function, but in the spline we use different number of degrees (exponential), while in Fourier series we sum odd product of the sine and cosine functions to represent the periodic function.        
+
+
+### 1.2
+
+Here are the functions we're going to use:
+
+```{r DMatrix_functions}
+
+knot <- function(x, d, q){
+  # The function takes the the features(data$x),
+  # a degree and a number of knots as arguments
+  # and returns the term (x-q)^d*(x>=q) as an output, which is equal to
+  # (x-q)^d if x>=q, otherwise is equal to 0
+  return ((x-q)^d*(x>=q))
+}
+
+
+vknots <- function(x, nodes){
+  # By passing the data(features) and the number of nodes, the function
+  # returns as an output a vector with all the n knots values
+  
+  vect <- vector(length = nodes) 
+  for(i in 1:length(vect)){
+    vect[i] <- i*(1/(nodes+1))
+  }
+  return (vect)
+}
+
+
+DMatrix <- function(x, degree, nodes){
+  mat = matrix(x, byrow = TRUE)
+  if(degree > 1){
+    for(i in 2:degree){
+      mat <- cbind(mat, x^i)
+    }
+  }
+  # Here we build the knots vector
+  vect <-vknots(x, nodes)
+  for(i in 1:length(vect)){
+    mat <- cbind(mat, knot(x, d = degree, q = vect[i]))
+  }
+  
+  return (mat)
+}
+
+
+# The structure of the matrix:
+
+#  1  x_1  (x_1)^2 ... (x_1)^d  (x_1-q_1)^d*(x_1>=q_1) ... (x_1-q_n)^d*(x_1>=q_n)
+#  1  x_2  (x_2)^2 ... (x_2)^d  (x_2-q_1)^d*(x_2>=q_1) ... (x_2-q_n)^d*(x_2>=q_n)
+#  1  x_3  (x_3)^2 ... (x_3)^d  (x_3-q_1)^d*(x_3>=q_1) ... (x_3-q_n)^d*(x_3>=q_n)
+# ... ...   ...    ...   ...            ...            ...          ...
+#  1  x_n  (x_n)^2 ... (x_n)^d  (x_n-q_1)^d*(x_n>=q_1) ... (x_n-q_n)^d*(x_n>=q_n)
+```
+
+
+
+```{r d1_q3}
+reg<-lm(y~x+I((x-0.25)*(x>=0.25))+I((x-0.50)*(x>=0.50))+I((x-0.75)*(x>=0.75)),
+        data = wmap)
+plot(y ~x, wmap, pch = 21, bg = "yellow", cex = .7, main = "d=1 and q=3",
+     xlab = "Multipole", ylab = "Power")
+lines(wmap$x, predict(reg), col= 'blue', lwd=2)
+```
+\newpage
+
+```{r d3_q3}
+reg<-lm(y~x+I(x^2)+I(x^3)+I((x-0.25)^3*(x>=0.25))+I((x-0.50)^3*(x>=0.50))+
+          I((x-0.75)^3*(x>=0.75)), data = wmap)
+plot(y ~x, wmap, pch = 21, bg = "yellow", cex = .7, main = "d=3 and q=3",
+     xlab = "Multipole", ylab = "Power")
+lines(wmap$x, predict(reg), col= 'blue', lwd=2)
+```
+\newpage
+
+```{r d1_q10}
+# fitting a model with degree=1 and q(number of knots)=10 to the data
+
+Mat1_10 = DMatrix(wmap$x, 1, 10)
+
+reg<-lm(y~ Mat1_10, data = wmap)
+plot(y ~x, wmap, pch = 21, bg = "yellow", cex = .7, main = "d=1 and q=10",
+     xlab = "Multipole", ylab = "Power")
+lines(wmap$x, predict(reg), col= 'blue', lwd=2)
+```
+\newpage
+
+```{r d3_q10}
+# fitting a model with degree=3 and q(number of knots)=10 to the data 
+Mat3_10 = DMatrix(wmap$x, 3, 10)
+
+reg<-lm(y~Mat3_10, data = wmap)
+plot(y ~x, wmap, pch = 21, bg = "yellow", cex = .7, main = "d=3 and q=10",
+     xlab = "Multipole", ylab = "Power")
+lines(wmap$x, predict(reg), col= 'blue', lwd=2)
+```
+\newpage
+
+### 1.3 Model Evaluation 
+
+The functions that we're going to use to evaluate our model:
+
+After training the model on the training data, we should evaluate our model performance on new data (unseen/evaluation data). To evaluate our model we used the cross validation method.
+
+```{r Evaluation_functions}
+
+ourLOOCV <- function(mat, mydata){
+  n <- nrow(mydata)
+  oneout <- vector()
+  for (i in 1:n){
+    # We build a vector (vect) that contains the subsets of the data on which we want
+    # to train the model(all the data excluding the i-element)
+
+    if(i==1){
+      vect <- c(2:n)
+    }else if(i==n){
+      vect <- c(1:(n-1))
+    }else{
+      vect <- c(1:(i-1))
+      vect1 <- c((i+1):n)
+      vect <- c(vect, vect1)
+    }
+    fit_i  <- lm( y ~ mat, data = mydata, subset = vect )    
+    yhat_i <- predict(fit_i, mydata) 
+    oneout[i] <- ( mydata$y[i] -  yhat_i[i] )^2
+  }
+  return (mean(oneout)) # LOOCV-score
+}
+
+# Implementing a grid search
+ourGridSearch <- function(mydata, qmin, qmax){
+  if(qmin>qmax){
+    return("error, qmin greater than qmax")
+  }
+  degrees <- c(1,3)
+  points <- c(qmin:qmax)
+  
+  #The Design matrix for the first case
+  Mat <- DMatrix(mydata$x, 1, qmin)
+  
+  # We set the minimum score(error) to be equal to the score of the first combination
+  min_score <-ourLOOCV(Mat, mydata)
+  
+  # To get the best score and the corresponding combination
+  # Of degree and number of knots (d, q)
+  best = c(1,qmin)
+  for(i in 1:length(degrees)){
+    for(j in 1:length(points)){
+      if(i!=1 && j!= 1){ # We don't have to recalculate the score for (1, qmin)
+        d <- degrees[i]
+        q <- points[j]
+        Mat <- DMatrix(mydata$x, d, q)
+        score <- ourLOOCV(Mat, mydata)
+        if(score<min_score){
+          min_score <- score
+          best <- c(d, q)
+        }
+      }
+    }
+  }
+  return(best)
+}
+
+# To evaluate the polynomial model performance
+ourPoly3LOOCV <- function(mydata, d){
+  n <- nrow(mydata)
+  oneout <- vector()
+  for (i in 1:n){
+    # We build a vector (vect) that contains the subset of the data on which we want
+    # To train (all the data except for the i-element)
+    if(i==1){
+      vect <- c(2:n)
+    }else if(i==n){
+      vect <- c(1:(n-1))
+    }else{
+      vect <- c(1:(i-1))
+      vect1 <- c((i+1):n)
+      vect <- c(vect, vect1)
+    }
+    fit_i  <- lm( y ~ poly(x,d), data = mydata, subset = vect )    
+    yhat_i <- predict(fit_i, mydata) 
+    oneout[i] <- ( mydata$y[i] -  yhat_i[i] )^2
+  }
+  return (mean(oneout)) # LOOCV-score
+}
+
+
+GTunedPolyRegression <- function(mydata){
+  d <- 1
+  min_score <- ourPoly3LOOCV(mydata, d)
+  while(TRUE){
+    d <- d + 1
+    score <- ourPoly3LOOCV(mydata, d)
+    if(score>min_score){
+      # We have a kind of momentum to avoid local minimums
+      k <- 0
+      for(i in 1:5){
+        k <- k + 1
+        d <- d + 1
+        score <- ourPoly3LOOCV(mydata, d)
+        if(score<min_score){
+          break
+        }
+      }
+      if(k == 5){
+        return(d-6)
+      }
+    }
+    min_score <- score
+  }
+}
+
+```
+
+\newpage
+
+Now we are going to use `ourGridSearch(mydata, qmin, qmax)` to find the spline with the combination of $d\in\{1,3\}$ and $q\in[q_{min},q_{max}]$ that best fits the data *mydata*.
+To choose the best combination of d and q, we will run our implementation of the LOOCV method: `ourLOOCV(mat, mydata)`, which takes a design matrix *mat* and the data *mydata* as input.
+
+This is the best combination of *d* and *q*, which gives us the best score:
+
+```{r best_couple, warning=FALSE}
+
+best_couple <- ourGridSearch(wmap, 3, 10) # From qmin = 3 to qmax = 10
+best_couple
+
+```
+
+Afterwards, we can use `DMatrix()` with those *d* and *q* (the best combination) to recall the design matrix of the spline that best fits our data *wmap*. We train the model(the best design matrix) using `lm()` and return the coefficients resulted from training the model.
+
+The coefficients:
+
+```{r}
+best_mat <- DMatrix(wmap$x, best_couple[1], best_couple[2])
+best_spline <- lm(y ~ best_mat, data = wmap )
+
+best_coefficients <- best_spline$coefficients
+best_coefficients
+
+```
+
+Plotting the splines:
+
+```{r}
+plot(y ~x, wmap, pch = 21, bg = "yellow", cex = .7,
+     main = "Best Spline",
+     xlab = "Multipole", ylab = "Power")
+lines(wmap$x, predict(best_spline), col= 'blue', lwd=2)
+
+```
+
+
+Showing the LOOCV score of our spline by directly calling `ourLOOCV()` function:
+
+```{r best_spline_score, warning=FALSE}
+
+bestSpline_score = ourLOOCV(best_mat, wmap)
+bestSpline_score
+
+```
+
+\newpage
+
+
+### 1.4
+
+
+Using `GTunedPolyRegression(mydata)` we can find the LOOCV-tuned polynomial regression that best fits the data *mydata*.
+The idea is that as long as the LOOCV-score of the current p-regression is less than the minimum score, we continue updating our current minimum score and searching for our best p-regression by increasing *d* of 1. 
+
+If the current regression has a LOOCV-score greater than the previous one, we check if any of the following $K$ (we have set $K = 5$) p-regression have a LOOCV-score less than our minimum score; if so, we continue our search from that degree on, otherwise we return the degree of the p-regression with score equal to the founded minimum score. In this way, there is less possibility to fall into a local minimum (for example p-regression of degree 2 has a LOOCV-score less than the one of the degree 2 p-regression).
+
+Then we can return the degree of the best polynomial regression and plot it with our best spline to compare their result:
+
+```{r gTuned_poly}
+
+gT_d = GTunedPolyRegression(wmap)
+# We look at the degree of the GCV-tuned pol-regression that we have found
+gT_d
+best_rpoly<-lm(y~poly(x, gT_d), data = wmap)
+plot(y ~x, wmap, pch = 21, bg = "yellow", cex = .7,
+     main = "Best Spline [BLUE] Vs Polynomial Regression [RED]",
+     xlab = "Multipole", ylab = "Power")
+lines(wmap$x, predict(best_rpoly), col= 'red', lwd=2)
+lines(wmap$x, predict(best_spline), col= 'blue', lwd=2)
+```
+
+It can be seen that they look very similar, indeed if we plot the corresponding LOOCV scores:
+
+```{r LOOCV_comparison, warning=FALSE}
+
+bestRPoly_score <- ourPoly3LOOCV(wmap, gT_d)
+bestRPoly_score
+bestSpline_score
+
+if(bestRPoly_score>bestSpline_score){
+  print("Best spline has a better LOOCV-score")
+}else if(bestRPoly_score<bestSpline_score){
+  print("Best p-regression has a better LOOCV-score")
+}else{
+  print("Same score")
+}
+
+```
+
+
+```{r coefficients}
+best_coefficients
+
+# best Coefficients of polynomial regression model
+best_rpoly$coefficients
+```
+
+By looking at the coefficients, We can notice that both of them have 7 coefficients. This is not surprising because the number of coefficients for a polynomial regression is equal to its degree (in our case 7) and the number of coefficients for a spline is equal to sum of its degree and number of knots (in our case 3 and 4, so 7).
+
+We should prefer to use the spline not only because it has a better LOOCV-score, but also because it has a smaller number of degrees (3 instead of 7) without losing any degree of freedom (still 7, 3+4), thanks to the addition of the 4 elements corresponding to the 4 knots.
+
+\newpage
+
+## Part 2
+
+### 2.1
+
+In this part, we are using part of the data by dropping the first 400 observations and saving the others in a data_frame called `wmap_sb`.
+
+```{r cutted_data}
+
+wmap_sb <- data.frame(x = wmap$x[-(1:400)], y = wmap$y[-(1:400)])
+
+plot(wmap_sb, pch = 21, bg = "red", cex = .7,
+main = "wmap_sb", xlab = "Multipole", ylab = "Power")
+
+```
+
+
+### 2.2
+
+We fit a simple linear regression model to the data and plot the result:
+
+```{r 2.2}
+# Fitting a linear regression model to the data
+lin_fit <- lm(y ~ x, data = wmap_sb)
+summary(lin_fit)
+
+# The residual error of the model
+residuals(lin_fit)
+plot(lin_fit, lwd=3)
+
+# Plotting the data and the model fitted on
+plot(wmap_sb, pch = 21, bg = "yellow", cex = .7,
+main = "lin_fit", xlab = "Multipole", ylab = "Power")
+lines(wmap_sb$x, predict(lin_fit), col= 'blue', lwd=3)
+```
+
+As we can see linear regression can not fit these data and does not perform well. The p-value of the slope is high, which means that we can not reject the null hypothesis and the slope is equal to 0. So, linear regression can not show the relationship between x and y. Additionally, the high residual shows that the model cannot catch the variations among the data; therefore, it can't give us good predictions.
+
+We evaluate the training mean-squared error and we store it into a variable called `MSEp_hat`
+
+```{r MSE_fit}
+MSEp_hat <- mean(summary(lin_fit)$residuals^2)
+MSEp_hat
+```
+
+### 2.3
+
+
+```{r warning=FALSE}
+
+# We find the best spline for wmap_sb
+best_2couple <- ourGridSearch(wmap_sb, 1, 10) # From qmin = 1 to qmax = 10
+best_2couple
+
+# We find the spline using the founded combination of d and q
+best_2mat <- DMatrix(wmap_sb$x, best_2couple[1], best_2couple[2])
+best_2spline <- lm(y ~ best_2mat, data = wmap_sb )
+
+# We calculate the MSE
+MSEnp_hat <- mean(summary(best_2spline)$residuals^2)
+MSEnp_hat
+```
+
+```{r plot_lin_spline}
+plot(wmap_sb, pch = 21, bg = "yellow", cex = .7,
+main = "lin_fit [BLUE] vs spline [RED]", xlab = "Multipole", ylab = "Power")
+lines(wmap_sb$x, predict(lin_fit), col= 'blue', lwd=2)
+lines(wmap_sb$x, predict(best_2spline), col= 'red', lwd=2)
+```
+
+By looking at the plot, we notice that the linear regression model and piece-wise regression spline have almost the same performance on these data with some slight difference at the end. the piece-wise spline model catch some variations of the data. As we saw even the MSE of the both model are somehow equal, which shows that they had a poor performance fitting the data. 
+
+
+### 2.4
+
+```{r t_hat_def}
+t_hat <- MSEp_hat - MSEnp_hat
+t_hat
+```
+
+### 2.5
+
+We're going to use this function to simulate new data form the previous data by adding some noise to them:
+
+```{r simulate_function}
+
+# Inputs: linear model (lin_fit), x values at which to simulate (sim_x)
+# Outputs: Data frame with columns x and y
+sim_lm = function(lin_fit, sim_x) {
+n = length(sim_x)
+sim_fr = data.frame(x = sim_x)
+sigma = summary(lin_fit)$sigma
+y_sim = predict(lin_fit, newdata = sim_fr)
+y_sim = y_sim + rnorm(n, 0, sigma) # Add noise
+sim_fr = data.frame(sim_fr, y = y_sim) # Adds y column
+return(sim_fr)
+}
+
+```
+
+The above function `sim_lm()`, takes the linear regression model and the features of the data to simulate new data using the fitted parametric model(linear regression). This function takes the parameter of the data (sigma) that was obtained by the fitted linear regression model to simulate some data with noise, that is to say it uses this parameter to add some add some noise to previous data using the standard normal distribution. These new data will be used to evaluate the performance of the parametric and nonparametric models. Next, we will train both models with simulated data and calculate their MSE to see how they perform on these new data.   
+
+```{r 2.5, warning=FALSE, echo=TRUE, results='hide'}
+
+B <- 500
+
+t_tilde <- c(1:B)
+MSEp_tilde <- c(1:B)
+MSEnp_tilde <- c(1:B)
+
+for(b in 1:B){
+  sim_data <- sim_lm(lin_fit, wmap_sb$x)
+  
+  lin_fit_b <- lm(y ~ x, data = sim_data)
+  MSEp_tilde[b] <- mean(summary(lin_fit_b)$residuals^2)
+  
+  best_couple_b <- ourGridSearch(sim_data, 1, 10)
+  best_mat_b <- DMatrix(sim_data$x, best_couple_b[1], best_couple_b[2])
+  best_spline_b <- lm(y ~ best_mat_b, data = sim_data )
+  MSEnp_tilde[b] <- mean(summary(best_spline_b)$residuals^2)
+  
+  t_tilde[b] <- MSEp_tilde[b] - MSEnp_tilde[b]
+  
+  print(b)
+}
+
+
+ 
+```
+
+### 2.6
+
+```{r p-value}
+
+delta <- c(rep(1, B))
+
+for(b in 1:B){ delta[b] <- delta[b] * (t_tilde[b]>t_hat) }
+
+p_value <- mean(delta)
+p_value
+
+```
+
+In eveluating the *p-value* we decided to run the simulation multiple times, most of them (pratically all them) returned a *p-value* greater then the *alpha*, so we can say that there is not enough evidence to reject the null hypotheses, which means that we can not say that there are secondary bumps or that a linear regression model is not a correct choice.
+
+Looking at the original scatterplot, and thinking about those secondary bumps, a spline should model their behavior by setting accordinly the number of knots and the number of degrees: the best spline we've found before the *parametric boostrap*, has degree 3 and number of knots equals to 2, which makes sense if we relate this with the presence of 2 secondary bumps; so the test of comparing the best possible model for this data (a tuned spline), for which we assume true the hypotheses **"There are secondary bumps"**, with a linear model for which that hypotheses is trivialy false seems reasonable.
+
+For the robustness of our conclusions we can say only that the *p-value* most of the time is greater than 0.05, this is due by its proximity with the value of *alpha*.
